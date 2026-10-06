@@ -1,9 +1,11 @@
 "use client";
 
+import { Suspense } from "react";
 import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
 
-export default function LoginPage() {
+// 1. Component handling useSearchParams
+function LoginForm() {
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl") || "/services";
 
@@ -44,5 +46,20 @@ export default function LoginPage() {
         </button>
       </div>
     </div>
+  );
+}
+
+// 2. Exported page wrapped with Suspense boundary
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-[80vh] flex items-center justify-center text-slate-400 font-semibold">
+          Loading login form...
+        </div>
+      }
+    >
+      <LoginForm />
+    </Suspense>
   );
 }
