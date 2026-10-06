@@ -50,9 +50,6 @@ FreshPulse is a modern, responsive web application for fresh produce and grocery
 
 ![FreshPulse Preview 7](./S7.png)
 
-<br />
-
-![FreshPulse Preview 7](./S8.png)
 
 </div>
 
