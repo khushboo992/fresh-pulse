@@ -21,4 +21,35 @@ FreshPulse is a modern, responsive web application for fresh produce and grocery
 - **Hosted On:** Vercel
 
 ## 📸 Application Preview
-./S1.png
+
+<div align="center">
+
+![FreshPulse Preview 1](./S1.png)
+
+<br />
+
+![FreshPulse Preview 2](./S2.png)
+
+<br />
+
+![FreshPulse Preview 3](./S3.png)
+
+<br />
+
+![FreshPulse Preview 4](./S4.png)
+
+<br />
+
+![FreshPulse Preview 5](./S5.png)
+
+<br />
+
+![FreshPulse Preview 6](./S6.png)
+
+<br />
+
+![FreshPulse Preview 7](./S7.png)
+
+</div>
+
+---
