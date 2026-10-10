@@ -1,14 +1,16 @@
+import { NextResponse } from "next/server";
 import { auth } from "@/app/_lib/auth";
 import { supabase } from "@/app/_lib/supabase";
-import { NextResponse } from "next/server";
 
-// GET: Fetch user's cart items
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export async function GET() {
   try {
     const session = await auth();
     const userEmail = session?.user?.email || "guest@freshpulse.com";
 
-    const { data: cartItems, error } = await supabase
+    const { data: cartData, error } = await supabase
       .from("cart_items")
       .select(
         `
@@ -19,66 +21,59 @@ export async function GET() {
           id,
           name,
           price,
-          image_url,
-          weight_quantity,
-          category
+          rating,
+          category,
+          image_url
         )
       `,
       )
       .eq("user_email", userEmail);
 
-    if (error) {
-      console.error("Supabase GET Cart Error:", error.message);
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    if (error) throw error;
 
-    return NextResponse.json(cartItems || []);
+    return NextResponse.json(cartData || []);
   } catch (err) {
-    console.error("GET Cart Exception:", err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
 
-// POST: Add/Update item in cart
 export async function POST(req) {
   try {
     const session = await auth();
     const userEmail = session?.user?.email || "guest@freshpulse.com";
-
     const { itemId, quantity } = await req.json();
 
-    if (!itemId) {
-      return NextResponse.json(
-        { error: "itemId is required" },
-        { status: 400 },
-      );
-    }
-
-    const { data, error } = await supabase
+    const { data: existing } = await supabase
       .from("cart_items")
-      .upsert(
-        {
-          user_email: userEmail,
-          item_id: itemId,
-          quantity: quantity || 1,
-        },
-        { onConflict: "user_email, item_id" },
-      )
-      .select();
+      .select("id, quantity")
+      .eq("user_email", userEmail)
+      .eq("item_id", itemId)
+      .maybeSingle();
 
-    if (error) {
-      console.error("Supabase POST Cart Error:", error.message);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    if (existing) {
+      const newQty = quantity !== undefined ? quantity : existing.quantity + 1;
+      const { error } = await supabase
+        .from("cart_items")
+        .update({ quantity: newQty })
+        .eq("id", existing.id);
+
+      if (error) throw error;
+    } else {
+      const { error } = await supabase.from("cart_items").insert({
+        user_email: userEmail,
+        item_id: itemId,
+        quantity: quantity || 1,
+      });
+
+      if (error) throw error;
     }
 
-    return NextResponse.json(data);
+    return NextResponse.json({ success: true });
   } catch (err) {
-    console.error("POST Cart Exception:", err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
 
-// DELETE: Remove item from cart
 export async function DELETE(req) {
   try {
     const session = await auth();
@@ -87,27 +82,25 @@ export async function DELETE(req) {
     const { searchParams } = new URL(req.url);
     const cartItemId = searchParams.get("id");
 
-    if (!cartItemId) {
-      return NextResponse.json(
-        { error: "id parameter is required" },
-        { status: 400 },
-      );
-    }
+    if (cartItemId) {
+      const { error } = await supabase
+        .from("cart_items")
+        .delete()
+        .eq("id", cartItemId)
+        .eq("user_email", userEmail);
 
-    const { error } = await supabase
-      .from("cart_items")
-      .delete()
-      .eq("id", cartItemId)
-      .eq("user_email", userEmail);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase
+        .from("cart_items")
+        .delete()
+        .eq("user_email", userEmail);
 
-    if (error) {
-      console.error("Supabase DELETE Cart Error:", error.message);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      if (error) throw error;
     }
 
     return NextResponse.json({ success: true });
   } catch (err) {
-    console.error("DELETE Cart Exception:", err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

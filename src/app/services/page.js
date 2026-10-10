@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Image from "next/image";
 import ShoppingNavbar from "@/components/ShoppingNavbar";
 import Sidebar from "@/components/Sidebar";
 import ProductModal from "@/components/ProductModal";
 import CartDrawer from "@/components/CartDrawer";
 import Toast from "@/components/Toast";
+import Chatbot from "@/components/Chatbot";
 import { supabase } from "@/app/_lib/supabase";
 
 const CATEGORIES = [
@@ -26,38 +27,48 @@ export default function ServicesPage() {
   const [cartItems, setCartItems] = useState([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
 
-  // Toast state
   const [toastMessage, setToastMessage] = useState("");
   const [isToastVisible, setIsToastVisible] = useState(false);
 
-  // 1. Fetch Products & Sync Cart on Component Mount
+  const fetchCartData = useCallback(async () => {
+    try {
+      const cartRes = await fetch(`/api/cart?t=${Date.now()}`, {
+        cache: "no-store",
+        headers: {
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          Pragma: "no-cache",
+        },
+      });
+
+      if (cartRes.ok) {
+        const backendCart = await cartRes.json();
+        if (Array.isArray(backendCart)) {
+          const normalized = backendCart.map((c) => ({
+            id: c.id,
+            item_id: c.item_id || c.items?.id,
+            quantity: c.quantity,
+            items: c.items || c,
+          }));
+          setCartItems(normalized);
+        }
+      }
+    } catch (err) {
+      console.error("Error refreshing cart:", err);
+    }
+  }, []);
+
   useEffect(() => {
     async function loadInitialData() {
       try {
         setLoadingProducts(true);
 
-        // Fetch Produce Items from Supabase
         const { data: itemsData, error: itemsError } = await supabase
           .from("items")
           .select("*");
         if (itemsError) throw itemsError;
         setProducts(itemsData || []);
 
-        // Fetch User Cart from API Endpoint
-        const cartRes = await fetch("/api/cart");
-        if (cartRes.ok) {
-          const backendCart = await cartRes.json();
-          if (Array.isArray(backendCart) && backendCart.length > 0) {
-            setCartItems(backendCart);
-            return;
-          }
-        }
-
-        // Fallback to localStorage for guest users
-        const localCart = localStorage.getItem("freshpulse_cart");
-        if (localCart) {
-          setCartItems(JSON.parse(localCart));
-        }
+        await fetchCartData();
       } catch (err) {
         console.error("Error initializing page data:", err);
       } finally {
@@ -66,9 +77,8 @@ export default function ServicesPage() {
     }
 
     loadInitialData();
-  }, []);
+  }, [fetchCartData]);
 
-  // 2. Local Storage Client Backup Sync
   useEffect(() => {
     if (cartItems.length > 0) {
       localStorage.setItem("freshpulse_cart", JSON.stringify(cartItems));
@@ -85,41 +95,53 @@ export default function ServicesPage() {
     setIsToastVisible(true);
   };
 
-  // 3. Add to Cart Handler
   const handleAddToCart = async (product) => {
     try {
-      setCartItems((prevItems) => {
-        const existing = prevItems.find(
-          (item) => (item.item_id || item.id) === product.id,
-        );
-        if (existing) {
-          return prevItems.map((item) =>
-            (item.item_id || item.id) === product.id
-              ? { ...item, quantity: item.quantity + 1 }
-              : item,
-          );
-        }
-        return [
-          ...prevItems,
-          { id: product.id, item_id: product.id, items: product, quantity: 1 },
-        ];
-      });
-
       showNotification(
         `Added ${product.name || product.title} to your basket!`,
       );
 
-      await fetch("/api/cart", {
+      setCartItems((prevItems) => {
+        const targetId = product.id;
+        const existingIndex = prevItems.findIndex(
+          (item) => (item.item_id || item.items?.id || item.id) === targetId,
+        );
+
+        if (existingIndex > -1) {
+          const updated = [...prevItems];
+          updated[existingIndex] = {
+            ...updated[existingIndex],
+            quantity: updated[existingIndex].quantity + 1,
+          };
+          return updated;
+        }
+
+        return [
+          ...prevItems,
+          {
+            id: `temp-${Date.now()}`,
+            item_id: product.id,
+            quantity: 1,
+            items: product,
+          },
+        ];
+      });
+
+      const res = await fetch("/api/cart", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ itemId: product.id, quantity: 1 }),
       });
+
+      if (res.ok) {
+        await fetchCartData();
+      }
     } catch (err) {
       console.error("Error adding to cart:", err);
+      await fetchCartData();
     }
   };
 
-  // 4. Update Quantity Handler
   const handleUpdateQuantity = async (cartItemId, delta) => {
     const targetItem = cartItems.find((item) => item.id === cartItemId);
     if (!targetItem) return;
@@ -146,12 +168,12 @@ export default function ServicesPage() {
           quantity: newQty,
         }),
       });
+      await fetchCartData();
     } catch (err) {
       console.error("Error updating cart quantity:", err);
     }
   };
 
-  // 5. Remove Item Handler
   const handleRemoveItem = async (cartItemId) => {
     setCartItems((prevItems) =>
       prevItems.filter((item) => item.id !== cartItemId),
@@ -161,23 +183,21 @@ export default function ServicesPage() {
       await fetch(`/api/cart?id=${cartItemId}`, {
         method: "DELETE",
       });
+      await fetchCartData();
     } catch (err) {
       console.error("Error removing cart item:", err);
     }
   };
 
-  // 6. Filter Logic
   const filteredProducts = products.filter((product) => {
     const query = searchQuery.toLowerCase().trim();
     const category = (product.category || "").toLowerCase().trim();
     const title = (product.name || product.title || "").toLowerCase();
 
-    // Priority 1: Text Search query (searches across full catalog)
     if (query.length > 0) {
       return title.includes(query) || category.includes(query);
     }
 
-    // Priority 2: Active Sidebar Category filter
     const isTopDeal = product.is_top_deal || product.isDeal;
     const activeCat = activeCategory.toLowerCase().trim();
 
@@ -195,16 +215,15 @@ export default function ServicesPage() {
   });
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col overflow-x-hidden">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col overflow-x-hidden relative">
       <ShoppingNavbar
         cartCount={totalCartCount}
         searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
+        onSearchChange={(q) => setSearchQuery(q)}
         onOpenCart={() => setIsCartOpen(true)}
       />
 
       <div className="flex flex-1 min-h-[calc(100vh-60px)] w-full max-w-[100vw]">
-        {/* Desktop Sidebar Navigation */}
         <Sidebar
           activeCategory={activeCategory}
           onSelectCategory={(catId) => {
@@ -214,7 +233,6 @@ export default function ServicesPage() {
         />
 
         <main className="flex-1 p-3 sm:p-6 md:p-8 max-w-7xl mx-auto w-full">
-          {/* Top Deals Promo Banner */}
           <div className="bg-gradient-to-r from-emerald-600 to-teal-700 rounded-2xl p-4 sm:p-6 md:p-8 mb-4 sm:mb-6 text-white shadow-xl">
             <span className="bg-white/20 text-[10px] sm:text-xs font-extrabold px-2.5 py-1 rounded-full uppercase tracking-wider">
               Special Discount
@@ -228,7 +246,6 @@ export default function ServicesPage() {
             </p>
           </div>
 
-          {/* Sticky Mobile Category Navigation Pills */}
           <div className="md:hidden sticky top-[53px] z-30 bg-slate-950/95 backdrop-blur py-2.5 -mx-3 px-3 border-b border-slate-800/80 mb-4 sm:mb-6">
             <div className="flex gap-2 overflow-x-auto no-scrollbar scroll-smooth">
               {CATEGORIES.map((cat) => {
@@ -253,7 +270,6 @@ export default function ServicesPage() {
             </div>
           </div>
 
-          {/* Product Grid Header */}
           <div className="flex items-center justify-between mb-3 sm:mb-6">
             <h2 className="text-base sm:text-lg md:text-xl font-bold text-slate-100 capitalize flex items-center gap-2">
               {searchQuery ? (
@@ -272,7 +288,6 @@ export default function ServicesPage() {
             </span>
           </div>
 
-          {/* Responsive Products Grid */}
           {loadingProducts ? (
             <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-6">
               {[...Array(4)].map((_, i) => (
@@ -358,7 +373,8 @@ export default function ServicesPage() {
         </main>
       </div>
 
-      {/* Modals & Overlay Drawers */}
+      <Chatbot onCartUpdate={fetchCartData} />
+
       <ProductModal
         product={selectedProduct}
         onClose={() => setSelectedProduct(null)}
@@ -374,7 +390,6 @@ export default function ServicesPage() {
         onClearCart={() => setCartItems([])}
       />
 
-      {/* Toast Notification */}
       <Toast
         message={toastMessage}
         isVisible={isToastVisible}
