@@ -13,7 +13,7 @@ export default function RootLayout({ children }) {
       <body>
         <Providers>
           {children}
-          <Chatbot cartId="default-cart" />
+          {/* <Chatbot cartId="default-cart" /> */}
         </Providers>
       </body>
     </html>
